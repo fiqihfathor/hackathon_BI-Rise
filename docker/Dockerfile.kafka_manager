@@ -1,0 +1,59 @@
+# ---------- Stage 1: Builder ----------
+ARG DEBIAN_VERSION=bookworm
+ARG UV_VERSION=latest
+ARG VARIANT=3.11
+
+FROM ghcr.io/astral-sh/uv:$UV_VERSION AS uv
+
+FROM python:${VARIANT}-slim-${DEBIAN_VERSION} AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy uv binary from UV stage
+COPY --from=uv /uv /uvx /bin/
+
+# Copy dependency files only for layer caching
+COPY kafka_manager/pyproject.toml kafka_manager/uv.lock ./
+
+# Set environment
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
+
+# Install build dependencies (only needed during build)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies (no install project to avoid editable mode)
+RUN uv sync --frozen --no-install-project
+
+# Copy full source code
+COPY kafka_manager /app/kafka_manager
+
+# Sync again with project if needed
+RUN uv sync --frozen --no-editable
+
+# ---------- Stage 2: Runtime ----------
+FROM python:${VARIANT}-slim-${DEBIAN_VERSION}
+
+WORKDIR /app
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev netcat-openbsd curl && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy everything from builder
+COPY --from=builder /app/kafka_manager /app/kafka_manager
+COPY --from=builder /app/.venv /app/.venv
+
+# Set env
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
+
+# Default command: create topics and register schema
+CMD ["sh", "-c", "/app/.venv/bin/python /app/kafka_manager/topics.py && /app/.venv/bin/python /app/kafka_manager/register_schema.py"]

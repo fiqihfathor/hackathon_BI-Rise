@@ -1,0 +1,37 @@
+FROM python:3.11-slim AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+# Copy pyproject.toml dan uv.lock ke /app
+COPY payment_gateway/pyproject.toml payment_gateway/uv.lock ./
+
+# Install dependencies dan buat venv di /app/.venv
+RUN uv venv && uv sync --locked --no-install-project --no-editable
+
+# Copy seluruh source code payment_gateway ke /app/payment_gateway
+COPY payment_gateway ./payment_gateway
+
+# Sinkron ulang deps setelah copy source
+RUN uv sync --locked --no-editable
+
+# Stage runtime
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# install dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    netcat-openbsd \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy .venv dan semua file dari builder
+COPY --from=builder /app /app
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Jalankan aplikasi (sesuaikan)
+CMD ["python", "payment_gateway/main.py"]

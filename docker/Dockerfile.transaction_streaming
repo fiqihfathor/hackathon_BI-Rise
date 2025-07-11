@@ -1,0 +1,45 @@
+FROM cnfldemos/flink-kafka:1.19.1-scala_2.12-java17
+
+USER root
+
+# Install Python3.10 dan tools runtime yang dibutuhkan + pip install uv
+RUN apt-get update && apt-get install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y python3.10 python3.10-venv python3.10-distutils python3-pip curl ca-certificates netcat-openbsd kafkacat && \
+    ln -sf /usr/bin/python3.10 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3 /usr/bin/python && \
+    pip3 install --upgrade pip && \
+    pip3 install uv && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Add Kafka client JARs for Flink KafkaSource compatibility
+RUN wget -P /opt/flink/lib https://repo.maven.apache.org/maven2/org/apache/flink/flink-connector-kafka/3.2.0-1.19/flink-connector-kafka-3.2.0-1.19.jar \
+    && wget -P /opt/flink/lib https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.5.1/kafka-clients-3.5.1.jar \
+    && wget -P /opt/flink/lib https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar
+
+# Atur permission agar user flink bisa akses dan modifikasi flink-conf.yaml
+RUN chmod 664 /opt/flink/conf/flink-conf.yaml && chown flink:flink /opt/flink/conf/flink-conf.yaml
+
+ENV FLINK_HOME=/opt/flink
+ENV PATH="$FLINK_HOME/bin:$PATH"
+ENV PYTHONPATH=$FLINK_HOME/opt/flink-python
+ENV UV_LINK_MODE=copy
+
+WORKDIR /app
+
+# Copy pyproject.toml, uv.lock, dan source code langsung ke /app/transaction_streaming
+COPY transaction_streaming/pyproject.toml transaction_streaming/uv.lock ./
+COPY transaction_streaming ./transaction_streaming
+
+# Buat virtualenv dan install dependencies pakai uv di runtime
+RUN uv venv && uv sync --locked --no-install-project --no-editable
+
+# Beri permission untuk script submit_job.sh jika ada
+RUN chmod +x /app/transaction_streaming/submit_job.sh
+
+# Set python executable untuk PyFlink
+ENV PYFLINK_CLIENT_EXECUTABLE="/app/.venv/bin/python"
+
+
+USER flink

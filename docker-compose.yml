@@ -1,0 +1,602 @@
+---
+services:
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: kafka-exporter
+    ports:
+      - "9308:9308"
+    command: ["--kafka.server=broker:29092"]
+    depends_on:
+      - broker
+    restart: always
+
+  broker:
+    image: confluentinc/cp-kafka:7.9.0
+    hostname: broker
+    container_name: broker
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://broker:29092,CONTROLLER://broker:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      # Replace CLUSTER_ID with a unique base64 UUID using "bin/kafka-storage.sh random-uuid"
+      # See https://docs.confluent.io/kafka/operations-tools/kafka-tools.html#kafka-storage-sh
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.9.0
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      - broker
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:29092'
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  connect:
+    image: cnfldemos/kafka-connect-datagen:0.6.4-7.6.0
+    hostname: connect
+    container_name: connect
+    depends_on:
+      - broker
+      - schema-registry
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: 'broker:29092'
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_GROUP_ID: compose-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+
+  ksqldb-server:
+    image: confluentinc/cp-ksqldb-server:7.9.0
+    hostname: ksqldb-server
+    container_name: ksqldb-server
+    depends_on:
+      - broker
+      - connect
+    ports:
+      - "8089:8088"
+    environment:
+      KSQL_CONFIG_DIR: "/etc/ksql"
+      KSQL_BOOTSTRAP_SERVERS: "broker:29092"
+      KSQL_HOST_NAME: ksqldb-server
+      KSQL_LISTENERS: "http://0.0.0.0:8088"
+      KSQL_CACHE_MAX_BYTES_BUFFERING: 0
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      KSQL_KSQL_CONNECT_URL: "http://connect:8083"
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_REPLICATION_FACTOR: 1
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: 'true'
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: 'true'
+
+  ksqldb-cli:
+    image: confluentinc/cp-ksqldb-cli:7.9.0
+    container_name: ksqldb-cli
+    depends_on:
+      - broker
+      - connect
+      - ksqldb-server
+    entrypoint: /bin/sh
+    tty: true
+
+  ksql-datagen:
+    image: confluentinc/ksqldb-examples:7.9.0
+    hostname: ksql-datagen
+    container_name: ksql-datagen
+    depends_on:
+      - ksqldb-server
+      - broker
+      - schema-registry
+      - connect
+    command: "bash -c 'echo Waiting for Kafka to be ready... && \
+                       cub kafka-ready -b broker:29092 1 40 && \
+                       echo Waiting for Confluent Schema Registry to be ready... && \
+                       cub sr-ready schema-registry 8081 40 && \
+                       echo Waiting a few seconds for topic creation to finish... && \
+                       sleep 11 && \
+                       tail -f /dev/null'"
+    environment:
+      KSQL_CONFIG_DIR: "/etc/ksql"
+      STREAMS_BOOTSTRAP_SERVERS: broker:29092
+      STREAMS_SCHEMA_REGISTRY_HOST: schema-registry
+      STREAMS_SCHEMA_REGISTRY_PORT: 8081
+
+  rest-proxy:
+    image: confluentinc/cp-kafka-rest:7.9.0
+    depends_on:
+      - broker
+      - schema-registry
+    ports:
+      - 8082:8082
+    hostname: rest-proxy
+    container_name: rest-proxy
+    environment:
+      KAFKA_REST_HOST_NAME: rest-proxy
+      KAFKA_REST_BOOTSTRAP_SERVERS: 'broker:29092'
+      KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
+      KAFKA_REST_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081'
+
+  flink-sql-client:
+    image: cnfldemos/flink-sql-client-kafka:1.19.1-scala_2.12-java17
+    depends_on:
+      - flink-jobmanager
+    hostname: flink-sql-client
+    container_name: flink-sql-client
+    environment:
+      FLINK_JOBMANAGER_HOST: flink-jobmanager
+  flink-jobmanager:
+    image: cnfldemos/flink-kafka:1.19.1-scala_2.12-java17
+    hostname: flink-jobmanager
+    container_name: flink-jobmanager
+    ports:
+    - 9081:9081
+    command: jobmanager
+    environment:
+    - |
+      FLINK_PROPERTIES=
+      jobmanager.rpc.address: flink-jobmanager
+      rest.bind-port: 9081
+  flink-taskmanager:
+    image: cnfldemos/flink-kafka:1.19.1-scala_2.12-java17
+    hostname: flink-taskmanager
+    container_name: flink-taskmanager
+    depends_on:
+    - flink-jobmanager
+    command: taskmanager
+    scale: 1
+    environment:
+    - |
+      FLINK_PROPERTIES=
+      jobmanager.rpc.address: flink-jobmanager
+      taskmanager.memory.process.size: 4096m
+      taskmanager.memory.flink.size: 3584m
+      taskmanager.memory.managed.size: 2048m
+      taskmanager.memory.jvm-metaspace.size: 256m
+      taskmanager.numberOfTaskSlots: 4 
+
+  postgres:
+    image: postgres:16
+    container_name: pg16-dev
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hacketon_fraud
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: redis-dev
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+
+  transaction-consumer-raw:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile.transaction_consumer
+    container_name: transaction-consumer-raw
+    env_file:
+      - .env
+    depends_on:
+      - broker
+      - minio
+      - postgres
+      - kafka-manager
+    command: >
+      sh -c '
+        until nc -z broker 29092; do echo "Waiting for broker..."; sleep 2; done &&
+        until curl --silent --fail http://schema-registry:8081/subjects | grep -q "transactions_raw-value"; do
+          echo "Waiting for schema to be registered..."; sleep 2;
+        done &&
+        python /app/transaction_consumer_raw/main.py
+      '
+    volumes:
+      - ./transaction_consumer_raw:/app/transaction_consumer_raw
+      - ./db:/app/db
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+
+  transaction-consumer-enriched:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile.transaction_consumer
+    container_name: transaction-consumer-enriched
+    env_file:
+      - .env
+    depends_on:
+      - broker
+      - minio
+      - postgres
+      - kafka-manager
+    command: >
+      sh -c '
+        until nc -z broker 29092; do echo "Waiting for broker..."; sleep 2; done &&
+        until curl --silent --fail http://schema-registry:8081/subjects | grep -q "transactions_raw-value"; do
+          echo "Waiting for schema to be registered..."; sleep 2;
+        done &&
+        python /app/transaction_consumer_enriched/main.py
+      '
+    volumes:
+      - ./transaction_consumer_enriched:/app/transaction_consumer_enriched
+      - ./db:/app/db
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+
+  kafka-manager:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile.kafka_manager
+    container_name: kafka-manager
+    env_file:
+      - .env
+    depends_on:
+      - broker
+      - schema-registry
+    command: >
+      sh -c '
+        until nc -z broker 29092; do echo "Waiting for broker..."; sleep 2; done &&
+        until curl --silent --fail http://schema-registry:8081/subjects; do echo "Waiting for schema-registry..."; sleep 2; done &&
+        python /app/kafka_manager/topics.py &&
+        python /app/kafka_manager/register_schema.py
+      '
+    volumes:
+      - ./kafka_manager:/app/kafka_manager
+    working_dir: /app
+
+  payment-gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.payment_gateway
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - broker
+      - schema-registry
+      - kafka-manager
+    command: >
+      sh -c '
+        until nc -z broker 29092; do echo "Waiting for broker..."; sleep 2; done &&
+        until curl --silent --fail http://schema-registry:8081/subjects | grep -q "transactions_raw-value"; do
+          echo "Waiting for schema to be registered..."; sleep 2;
+        done &&
+        python /app/payment_gateway/main.py
+      '
+    volumes:
+      - ./payment_gateway:/app/payment_gateway
+    working_dir: /app
+
+  traefik:
+    image: "traefik"
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
+      - "--certificatesresolvers.mytlschallenge.acme.email=${SSL_EMAIL}"
+      - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
+    volumes:
+      - traefik_data:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    env_file:
+      - .env
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    depends_on:
+      - postgres
+      - broker
+      - schema-registry
+    env_file:
+      - .env
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.n8n.rule=Host(`${SUBDOMAIN}.${DOMAIN_NAME}`)
+      - traefik.http.routers.n8n.tls=true
+      - traefik.http.routers.n8n.entrypoints=web,websecure
+      - traefik.http.routers.n8n.tls.certresolver=mytlschallenge
+      - traefik.http.middlewares.n8n.headers.SSLRedirect=true
+      - traefik.http.middlewares.n8n.headers.STSSeconds=315360000
+      - traefik.http.middlewares.n8n.headers.browserXSSFilter=true
+      - traefik.http.middlewares.n8n.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.n8n.headers.forceSTSHeader=true
+      - traefik.http.middlewares.n8n.headers.SSLHost=${DOMAIN_NAME}
+      - traefik.http.middlewares.n8n.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.n8n.headers.STSPreload=true
+      - traefik.http.routers.n8n.middlewares=n8n@docker
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_data
+      - DB_POSTGRESDB_USER=postgres
+      - DB_POSTGRESDB_PASSWORD=postgres
+      - N8N_HOST=${SUBDOMAIN}.${DOMAIN_NAME}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - NODE_ENV=production
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - WEBHOOK_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}/
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+      - ./files:/files
+  
+  neo4j:
+    image: neo4j:latest
+    container_name: neo4j
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    depends_on:
+      - postgres
+    environment:
+      - NEO4J_AUTH=neo4j/qwerty123
+      - NEO4J_server_memory_pagecache_size=512M
+      - NEO4J_server_memory_heap_initial__size=512M
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4JLABS_PLUGINS=["apoc"] 
+      - NEO4J_dbms_security_procedures_whitelist=apoc.*, gds.*
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      # Uncomment below if you want to allow remote access (not recommended for prod)
+      # - NEO4J_dbms_connector_bolt_advertised__address=0.0.0.0:7687
+      # - NEO4J_dbms_connector_http_advertised__address=0.0.0.0:7474
+    volumes:
+      - ./neo4j/data:/data
+      - ./neo4j/logs:/logs
+      - ./neo4j/plugins:/plugins
+      - ./neo4j/import:/var/lib/neo4j/import
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "qwerty123", "MATCH (n) RETURN COUNT(n);"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: always
+  
+  payment-gateway-ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.payment_gateway_ui
+    ports:
+      - "8502:8502"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - kafka-manager
+      - payment-gateway
+      - redis
+    command: >
+      sh -c '
+        until nc -z postgres 5432; do echo "Waiting for postgres..."; sleep 2; done &&
+        streamlit run /app/payment_gateway_ui/app.py --server.port 8502
+      '
+    volumes:
+      - ./payment_gateway_ui:/app/payment_gateway_ui
+    working_dir: /app
+  
+  fraud-dispatcher:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.fraud_dispatcher
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - kafka-manager
+    command: >
+      sh -c '
+        until nc -z postgres 5432; do echo "Waiting for postgres..."; sleep 2; done &&
+        until nc -z broker 29092; do echo "Waiting for broker..."; sleep 2; done &&
+        python /app/fraud_dispatcher/main.py
+      '
+    volumes:
+      - ./fraud_dispatcher:/app/fraud_dispatcher
+    working_dir: /app
+
+  bscore-agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.bscore_agent
+    env_file:
+      - .env
+    depends_on:
+      - kafka-manager
+    command: >
+      sh -c '
+        until nc -z broker 29092; do echo "Waiting for broker..."; sleep 2; done &&
+        until curl --silent --fail http://schema-registry:8081/subjects | grep -q "transactions_raw-value"; do
+          echo "Waiting for schema to be registered..."; sleep 2;
+        done &&
+        python /app/bscore_agent/main.py
+      '
+    volumes:
+      - ./bscore_agent:/app/bscore_agent
+    working_dir: /app
+
+  airule-agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.airule_agent
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - kafka-manager
+      - redis
+    environment:
+      - PYTHONPATH=/app
+    command: >
+      sh -c '
+        until nc -z postgres 5432; do echo "Waiting for postgres..."; sleep 2; done &&
+        until nc -z broker 29092; do echo "Waiting for broker..."; sleep 2; done &&
+        until curl --silent --fail http://schema-registry:8081/subjects | grep -q "transactions_raw-value"; do
+          echo "Waiting for schema to be registered..."; sleep 2;
+        done &&
+        python /app/airule_agent/main.py
+      '
+    volumes:
+      - ./airule_agent:/app/airule_agent
+      - ./db:/app/db
+    working_dir: /app
+
+  fraud-detection-ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.fraud_detection_ui
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    command: >
+      sh -c '
+        until nc -z redis 6379; do echo "Waiting for redis..."; sleep 2; done &&
+        streamlit run /app/fraud_detection_ui/app.py --server.port 8501
+      '
+    volumes:
+      - ./fraud_detection_ui:/app/fraud_detection_ui
+    working_dir: /app
+
+  alert-consolidator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.alert_consolidator
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - kafka-manager
+      - broker
+    environment:
+      - PYTHONPATH=/app
+    command: >
+      sh -c '
+        until nc -z postgres 5432; do echo "Waiting for postgres..."; sleep 2; done &&
+        until nc -z broker 29092; do echo "Waiting for broker..."; sleep 2; done &&
+        until curl --silent --fail http://schema-registry:8081/subjects | grep -q "transactions_raw-value"; do
+          echo "Waiting for schema to be registered..."; sleep 2;
+        done &&
+        python /app/alert_consolidator/main.py
+      '
+    volumes:
+      - ./alert_consolidator:/app/alert_consolidator
+      - ./db:/app/db
+    working_dir: /app
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./prometheus:/etc/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: always
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - '3001:3000'
+    depends_on:
+      - prometheus
+      - postgres
+    restart: always
+    environment:
+      - GF_USERS_ADMIN_PASSWORD=grafana
+      - GF_USERS_ADMIN_USER=admin
+      - GF_USERS_DEFAULT_PASSWORD=grafana
+      - GF_USERS_DEFAULT_USER=grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  # dashboard:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.dashboard
+  #   ports:
+  #     - "3001:80"
+  #   restart: unless-stopped
+
+
+volumes:
+  pgdata:
+  redisdata:
+  minio-data:
+  traefik_data:
+  n8n_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:
+  neo4j_import:
+  prometheus:
+  grafana_data:
+  flink-jobmanager:
+  flink-taskmanager:

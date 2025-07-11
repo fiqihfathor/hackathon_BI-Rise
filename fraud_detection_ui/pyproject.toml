@@ -1,0 +1,12 @@
+[project]
+name = "fraud-detection-ui"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.46.0",
+    "confluent-kafka>=2.10.1",
+    "python-dotenv>=1.0.0",
+    "redis>=6.2.0"
+]

@@ -1,0 +1,36 @@
+# ---------- Stage 1: Build stage dengan uv ----------
+FROM python:3.11-slim AS builder
+
+# Copy uv binary official dari image uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+# Copy pyproject.toml dan uv.lock ke root /app untuk dependency management
+COPY transaction_consumer_raw/pyproject.toml transaction_consumer_raw/uv.lock ./
+
+# Buat virtualenv dan install dependencies (frozen mode)
+RUN uv venv && uv sync --frozen --no-install-project
+
+# Copy seluruh source code aplikasi ke folder transaction_consumer
+COPY transaction_consumer_raw ./transaction_consumer_raw
+COPY db ./db
+
+# Sinkron ulang dependencies untuk mode editable
+RUN uv sync --frozen --no-editable
+
+# ---------- Stage 2: Runtime ----------
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies OS yang diperlukan di runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev netcat-openbsd curl && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy hasil build dari builder (termasuk .venv, pyproject.toml, uv.lock, dan source code)
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/transaction_consumer_raw/pyproject.toml /app/transaction_consumer_raw/uv.lock /app/
+
+# Set PATH agar python dan uvicorn dari virtualenv yang dipakai
+ENV PATH="/app/.venv/bin:$PATH"

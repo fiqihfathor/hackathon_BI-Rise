@@ -1,0 +1,5 @@
+# Created at 2025-07-06T12:37:53.880
+Boot Manifest-JAR contains absolute paths in classpath 'D:\fiqih-cobs\work\main\hacketon-fraud\transaction_streaming_flink\target\test-classes'
+Hint: <argLine>-Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
+'other' has different root
+

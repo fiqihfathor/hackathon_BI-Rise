@@ -1,0 +1,10 @@
+apache-flink==1.19.1
+apache-flink-libraries==1.19.1
+avro-python3==1.10.2
+fastavro<2
+confluent-kafka[schema-registry]>=2.5.0
+pydantic>=2.7.2
+python-dotenv>=1.0.0
+pandas>=1.5.3
+requests>=2.31.0
+python-dateutil

@@ -1,0 +1,16 @@
+com\fraud_detection\flink\mapper\FeatureExtractor.class
+com\fraud_detection\flink\process\TxnSummaryKeyedProcessFunction.class
+com\fraud_detection\flink\FlinkJob$2.class
+com\fraud_detection\flink\mapper\FraudFilter.class
+com\fraud_detection\flink\model\EnrichedTransaction.class
+com\fraud_detection\flink\Serializer\EnrichedTransactionSerializer.class
+com\fraud_detection\flink\FlinkJob$1.class
+com\fraud_detection\flink\process\RollingSummaryProcessFunction$1.class
+com\fraud_detection\flink\utils\JsonUtils.class
+com\fraud_detection\flink\process\SummaryEnrichmentBroadcastProcessFunction.class
+com\fraud_detection\flink\model\SummaryAccumulator.class
+com\fraud_detection\flink\model\Transaction.class
+com\fraud_detection\flink\process\RollingSummaryProcessFunction.class
+com\fraud_detection\flink\Deserializer\JSONValueDeserializationSchema.class
+com\fraud_detection\flink\FlinkJob$UserBankKeySelector.class
+com\fraud_detection\flink\FlinkJob.class

@@ -1,0 +1,39 @@
+{
+  "namespace": "com.example.fraud",
+  "type": "record",
+  "name": "TransactionEvent",
+  "fields": [
+    { "name": "transaction_id", "type": "string" },
+
+    { "name": "source_transaction_id", "type": "string" },
+    { "name": "source_user_id", "type": "string" },
+    { "name": "source_account_id", "type": ["null", "string"], "default": null },
+    { "name": "source_merchant_code", "type": ["null", "string"], "default": null },
+
+    { "name": "amount", "type": "double" },
+    { "name": "currency", "type": "string" },
+    { "name": "transaction_type", "type": "string" },
+    { "name": "transaction_time", "type": ["null", "string"], "default": null },
+
+    { "name": "location", "type": ["null", "string"], "default": null },
+
+    { "name": "device_id", "type": ["null", "string"], "default": null },
+    { "name": "device_type", "type": ["null", "string"], "default": null },
+    { "name": "os_version", "type": ["null", "string"], "default": null },
+    { "name": "app_version", "type": ["null", "string"], "default": null },
+    { "name": "is_emulator", "type": ["null", "boolean"], "default": null },
+
+    { "name": "ip_address", "type": ["null", "string"], "default": null },
+    { "name": "ip_location", "type": ["null", "string"], "default": null },
+    { "name": "is_proxy", "type": ["null", "boolean"], "default": null },
+
+    { "name": "notes", "type": ["null", "string"], "default": null },
+
+    { "name": "received_time", "type": "string" },
+    { "name": "bank_id", "type": "string" },
+
+    { "name": "is_fraud", "type": "boolean", "default": false },
+    { "name": "bscore", "type": "double", "default": 0.0 },
+    { "name": "currency_exchange_rate", "type": "double", "default": 1.0 }
+  ]
+}
