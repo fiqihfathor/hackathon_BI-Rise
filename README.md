@@ -23,7 +23,7 @@ This project is a fraud detection system that leverages BSCORE, a probability sc
 - Rule-based AI agent for automated fraud pattern detection and decision support
 - Integrated chatbot for user interaction and support
 
-## Dataset
+## Table Schema
 Table : User
 Column Name | Data Type | Description
 --- | --- | ---
